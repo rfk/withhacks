@@ -1,0 +1,7 @@
+*.so
+*.o
+*.pyc
+*~
+bbfreeze/*.exe
+bbfreeze.egg-info
+MANIFEST
