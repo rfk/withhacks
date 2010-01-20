@@ -486,6 +486,12 @@ class namespace(CaptureBytecode):
                 funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(STORE_ATTR,arg)]
             elif op in (DELETE_FAST,DELETE_NAME,):
                 funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(DELETE_ATTR,arg)]
+            elif op in (LOAD_GLOBAL,LOAD_DEREF,):
+                if not self._name_used_before(arg):
+                    funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(LOAD_ATTR,arg)]
+            elif op in (DELETE_GLOBAL,):
+                if not self._name_used_before(arg):
+                    funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(DELETE_ATTR,arg)]
         #  Create function object to do the manipulation
         funcode.args = ("namespace",)
         funcode.varargs = False
@@ -498,4 +504,11 @@ class namespace(CaptureBytecode):
         if self.as_name is not None:
             self._set_context_locals({self.as_name:self.namespace})
         return retcode
+
+    def _name_used_before(self,name):
+        for (op,arg) in self.bytecode_before.code:
+            if op in (LOAD_GLOBAL,LOAD_DEREF,STORE_GLOBAL,STORE_DEREF,):
+                if arg == name:
+                    return True
+        return False
 
