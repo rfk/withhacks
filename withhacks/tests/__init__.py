@@ -4,6 +4,7 @@ from __future__ import with_statement
 import os
 import sys
 import unittest
+import doctest
 
 import withhacks
 from withhacks import *
@@ -11,6 +12,10 @@ from withhacks import *
 
 class TestWithHacks(unittest.TestCase):
     """Testcases for the "withhacks" module."""
+
+    def test_docstrings(self):
+        """Test withhacks docstrings."""
+        assert doctest.testmod(withhacks,verbose=True)[0] == 0
 
     def test_README(self):
         """Ensure that the README is in sync with the docstring.

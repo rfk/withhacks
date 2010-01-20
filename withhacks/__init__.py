@@ -1,8 +1,10 @@
 """
 
-  withhacks:  building blocks for hacks using the "with" statement
+  withhacks:  building blocks for with-statement-related hackery
 
-http://code.google.com/p/ouspg/wiki/AnonymousBlocksInPython
+
+Building on ideas from:
+    http://code.google.com/p/ouspg/wiki/AnonymousBlocksInPython
 
 """
 
@@ -10,6 +12,10 @@ import sys
 import new
 import copy
 from dis import HAVE_ARGUMENT
+try:
+    import threading
+except ImportError:
+    import dummy_threading as threading
 
 from withhacks.byteplay import *
 
@@ -19,8 +25,56 @@ class _ExitContext(Exception):
     pass
 
 
+class _Bucket:
+    """Anonymous attribute bucket class."""
+    pass
+
+
+class TraceManager(object):
+    """Single class for managing frame trace functions."""
+
+    lock = threading.Lock()
+    orig_sys_trace = None
+    orig_trace_funcs = {}
+
+    @classmethod
+    def _enable_tracing(self):
+        """Enable system-wide tracing, if it wasn't already."""
+        if len(self.orig_trace_funcs) == 1:
+            try:
+                self.orig_sys_trace = sys.gettrace()
+            except AttributeError:
+                self.orig_sys_trace = None
+            if self.orig_sys_trace is None:
+                sys.settrace(lambda *args,**kwds: None)
+
+    @classmethod
+    def _disable_tracing(self):
+        """Disable system-wide tracing, if we specifically switched it on."""
+        if len(self.orig_trace_funcs) == 1:
+            if self.orig_sys_trace is None:
+                sys.settrace(None)
+
+    @classmethod
+    def set_trace(self,frame,trace):
+        """Set a new trace function on the given frame."""
+        with self.lock:
+            self.orig_trace_funcs[frame] = frame.f_trace
+            frame.f_trace = trace
+            self._enable_tracing()
+          
+
+    @classmethod
+    def restore_trace(self,frame):
+        """Restore the original trace function to the given frame."""
+        with self.lock:
+            self._disable_tracing()
+            frame.f_trace = self.orig_trace_funcs.pop(frame)
+
+
+
 class WithHack(object):
-    """Base class for with-statement-related hacks.
+    """Base class for with-statement-related hackery.
 
     This class provides some useful utilities for constructing with-statement
     hacks.  Specifically:
@@ -29,53 +83,31 @@ class WithHack(object):
         * ability to access the frame of execution containing the block
         * ability to update local variables in the execution frame
 
+    If a subclass sets the attribute "dont_execute" to true then execution
+    of the with-statement's contained code block will be skipped.  If it sets
+    the attribute "must_execute" to true, the block will be executed regardless
+    of the setting of "dont_execute".  Having two settings allows hacks that
+    want to skip the block to be combined with hacks that need it executed.
     """
 
     dont_execute = False
     must_execute = False
 
-    def __init__(self):
-        self.__trace_level = 0
-
-    def _enable_sys_trace(self):
-        """Enable function tracing at the system level.
-
-        You must call this method before attempting any trace-function-related
-        hacks, or the trace function might not actually get called.
-        """
-        if self.__trace_level == 0:
-            try:
-                self.__orig_sys_trace = sys.gettrace()
-            except AttributeError:
-                self.__orig_sys_trace = None
-            if self.__orig_sys_trace is None:
-                sys.settrace(lambda *args,**kwds: None)
-        self.__trace_level += 1
-
-    def _disable_sys_trace(self):
-        """Disable function tracing at the system level."""
-        self.__trace_level -= 1
-        if self.__trace_level == 0:
-            if self.__orig_sys_trace is None:
-                sys.settrace(None)
-
-    def _get_context_frame(self,offset=0):
+    def _get_context_frame(self):
         """Get the frame object corresponding to the with-statement context.
 
-        This is designed to work from within superclass method calls, but the
-        heuristics aren't 100% accurate.  You'll need to obey the following
-        rules:
-
-            * always name the self argument "self"
-            * only call super() methods from within the overridden method
-        
+        This is designed to work from within superclass method call. It finds
+        the first frame in which the variable "self" is not bound to this 
+        object.  While this heuristic rules out some strange uses of WithHack
+        objects (such as entering on object inside its own __exit__ method)
+        it should suffice in practise.
         """
         try:
             return self.__frame
         except AttributeError:
-            f = sys._getframe(1+offset)
-            name = f.f_code.co_name
-            while f.f_locals.get("self") is self and f.f_code.co_name == name:
+            # Offset 2 accounts for this method, and the one calling it.
+            f = sys._getframe(2)
+            while f.f_locals.get("self") is self:
                 f = f.f_back
             self.__frame = f
             return f
@@ -86,32 +118,23 @@ class WithHack(object):
         The argument "locals" is a dictionary of name bindings to be inserted
         into the execution context of the with-statement.
         """
-        frame = self._get_context_frame(1)
+        frame = self._get_context_frame()
         def trace(frame,event,arg):
             frame.f_locals.update(locals)
-            self._disable_sys_trace()
-            del frame.f_trace
-        self._enable_sys_trace()
-        frame.f_trace = trace
+            TraceManager.restore_trace(frame)
+        TraceManager.set_trace(frame,trace)
 
     def __enter__(self):
-        #  Use trace function magic to avoid executing the block if necessary
         if self.dont_execute and not self.must_execute:
             frame = self._get_context_frame()
-            self.__orig_frame_trace = frame.f_trace
-            self._enable_sys_trace()
-            frame.f_trace = self.__exit_context_trace
+            def trace(frame,event,arg):
+                raise _ExitContext
+            TraceManager.set_trace(frame,trace)
         return self
 
-    def __exit_context_trace(self,frame,event,arg):
-        raise _ExitContext
-
     def __exit__(self,exc_type,exc_value,traceback):
-        #  Restore trace function if we mucked with it
         if self.dont_execute and not self.must_execute:
-            self._disable_sys_trace()
-            self.__frame.f_trace = self.__orig_frame_trace
-        #  Suppress the special _ExitContext exception
+            TraceManager.restore_trace(self._get_context_frame())
         if exc_type is _ExitContext:
             return True
         else:
@@ -155,13 +178,15 @@ class CaptureBytecode(WithHack):
             else:
                 i += 1
         bytecode.code = bytecode.code[offset:]
+        #  Get rid of SetLineno operations, they're troublesome
+        bytecode.code = [(op,arg) for (op,arg) in bytecode.code if op is not SetLineno]
         #  Remove code setting up the with-statement block.
         while bytecode.code[0][0] != SETUP_FINALLY:
             bytecode.code = bytecode.code[1:]
         bytecode.code = bytecode.code[1:]
         #  If the with-statement has an "as" clause, capture the name
         #  and remove the setup code.
-        if bytecode.code[0][0] == LOAD_FAST:
+        if bytecode.code[0][0] in (LOAD_FAST,LOAD_NAME,LOAD_DEREF,LOAD_GLOBAL):
             if bytecode.code[0][1].startswith("_["):
                 bytecode.code = bytecode.code[2:]
             self.as_name = bytecode.code[0][1]
@@ -170,8 +195,6 @@ class CaptureBytecode(WithHack):
         while bytecode.code[-1][0] != POP_BLOCK:
             bytecode.code = bytecode.code[:-1]
         bytecode.code = bytecode.code[:-1]
-        #  Get rid of SetLineno operations, they're troublesome
-        bytecode.code = [(op,arg) for (op,arg) in bytecode.code if op is not SetLineno]
         #  OK, ready!
         self.bytecode = bytecode
         return super(CaptureBytecode,self).__exit__(*args)
@@ -192,11 +215,11 @@ class CaptureFunction(CaptureBytecode):
 
     Here's a quick example:
 
-        >>>  with CaptureFunction(("message","times",)) as f:
-        ...      for i in xrange(times):
-        ...          print message
-        ... 
-        >>>  f.function("hello world",2)
+        >>> with CaptureFunction(("message","times",)) as f:
+        ...     for i in xrange(times):
+        ...         print message
+        ...
+        >>> f.function("hello world",2)
         hello world
         hello world
         >>>
@@ -216,10 +239,12 @@ class CaptureFunction(CaptureBytecode):
         frame = self._get_context_frame()
         retcode = super(CaptureFunction,self).__exit__(*args)
         funcode = copy.deepcopy(self.bytecode)
-        #  Ensure it's properly formed by always returning something
+        #  Ensure it's a properly formed func by always returning something
         funcode.code.append((LOAD_CONST,None))
         funcode.code.append((RETURN_VALUE,None))
-        #  Switch name access opcodes as appropriate
+        #  Switch name access opcodes as appropriate.
+        #  Any new locals are local to the function; existing locals
+        #  are manipulated using LOAD/STORE/DELETE_NAME.
         for (i,(op,arg)) in enumerate(funcode.code):
             if op in (LOAD_FAST,LOAD_DEREF,LOAD_NAME,LOAD_GLOBAL):
                 if arg in self.__args:
@@ -267,11 +292,10 @@ class CaptureLocals(WithHack):
 
         >>> with CaptureLocals() as f:
         ...     x = 7
-        ...     def test():
-        ...         return 8
+        ...     y = 8
         ...
         >>> f.locals
-        {'test': 8, 'x': 7}
+        {'y': 8, 'x': 7}
         >>>
 
     """
@@ -305,13 +329,12 @@ class CaptureOrderedLocals(CaptureBytecode):
     the execution of the block.   The variables are listed in the order
     they are first assigned.
 
-        >>> with CaptureOrderdLocals() as f:
+        >>> with CaptureOrderedLocals() as f:
         ...     x = 7
-        ...     def test():
-        ...         return 8
+        ...     y = 8
         ...
         >>> f.locals
-        [('x',7), ('test',8)]
+        [('x', 7), ('y', 8)]
         >>>
 
     """
@@ -323,19 +346,63 @@ class CaptureOrderedLocals(CaptureBytecode):
         frame = self._get_context_frame()
         local_names = []
         for (op,arg) in self.bytecode.code:
-           if op == STORE_FAST:
+           if op in (STORE_FAST,STORE_NAME,):
                if arg not in local_names:
                    local_names.append(arg)
         self.locals = [(nm,frame.f_locals[nm]) for nm in local_names]
         return retcode
 
 
-class extra_kwargs(CaptureLocals,CaptureBytecode):
+class xargs(CaptureOrderedLocals):
+    """WithHack to call a function with arguments defined in the block.
+
+    This WithHack captures the value of any local variables created or 
+    modified in the scope of the block, then passes those values as extra
+    positional arguments to the given function call.  The result of the
+    function call is stored in the "as" variable if given.
+
+        >>> with xargs(filter) as evens:
+        ...     def filter_func(i):
+        ...         return (i % 2) == 0
+        ...     items = range(10)
+        ...
+        >>> print evens
+        [0, 2, 4, 6, 8]
+        >>>
+      
+    """
+
+    def __init__(self,func,*args,**kwds):
+        self.__func = func
+        self.__args = args
+        self.__kwds = kwds
+        super(xargs,self).__init__()
+
+    def __exit__(self,*args):
+        retcode = super(xargs,self).__exit__(*args)
+        args_ = [arg for arg in self.__args]
+        args_.extend([arg for (nm,arg) in self.locals])
+        retval = self.__func(*args_,**self.__kwds)
+        if self.as_name is not None:
+            self._set_context_locals({self.as_name:retval})
+        return retcode
+
+
+class xkwargs(CaptureLocals,CaptureBytecode):
     """WithHack calling a function with extra keyword arguments.
 
     This WithHack captures any local variables created during execution of
     the block, then calls the given function using them as extra keyword
     arguments.
+
+        >>> def calculate(a,b):
+        ...     return a * b
+        ...
+        >>> with xkwargs(calculate,b=2) as result:
+        ...     a = 5
+        ...
+        >>> print result
+        10
 
     """
 
@@ -343,31 +410,13 @@ class extra_kwargs(CaptureLocals,CaptureBytecode):
         self.__func = func
         self.__args = args
         self.__kwds = kwds
-        super(extra_kwargs,self).__init__()
+        super(xkwargs,self).__init__()
 
     def __exit__(self,*args):
-        retcode = super(extra_kwargs,self).__exit__(*args)
+        retcode = super(xkwargs,self).__exit__(*args)
         kwds = self.__kwds.copy()
         kwds.update(self.locals)
         retval = self.__func(*self.__args,**kwds)
-        if self.as_name is not None:
-            self._set_context_locals({self.as_name:retval})
-        return retcode
-
-
-class extra_args(CaptureOrderedLocals):
-
-    def __init__(self,func,*args,**kwds):
-        self.__func = func
-        self.__args = args
-        self.__kwds = kwds
-        super(extra_args,self).__init__()
-
-    def __exit__(self,*args):
-        retcode = super(extra_args,self).__exit__(*args)
-        args_ = [arg for arg in self.__args]
-        args_.extend([arg for (nm,arg) in self.locals])
-        retval = self.__func(*args_,**self.__kwds)
         if self.as_name is not None:
             self._set_context_locals({self.as_name:retval})
         return retcode
