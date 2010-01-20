@@ -479,19 +479,7 @@ class namespace(CaptureBytecode):
         funcode.code.append((LOAD_CONST,None))
         funcode.code.append((RETURN_VALUE,None))
         #  Switch LOAD/STORE/DELETE_FAST/NAME to LOAD/STORE/DELETE_ATTR
-        for (i,(op,arg)) in enumerate(funcode.code):
-            if op in (LOAD_FAST,LOAD_NAME,):
-                funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(LOAD_ATTR,arg)]
-            elif op in (STORE_FAST,STORE_NAME,):
-                funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(STORE_ATTR,arg)]
-            elif op in (DELETE_FAST,DELETE_NAME,):
-                funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(DELETE_ATTR,arg)]
-            elif op in (LOAD_GLOBAL,LOAD_DEREF,):
-                if not self._name_used_before(arg):
-                    funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(LOAD_ATTR,arg)]
-            elif op in (DELETE_GLOBAL,):
-                if not self._name_used_before(arg):
-                    funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(DELETE_ATTR,arg)]
+        self._adjust_names(funcode)
         #  Create function object to do the manipulation
         funcode.args = ("namespace",)
         funcode.varargs = False
@@ -505,10 +493,76 @@ class namespace(CaptureBytecode):
             self._set_context_locals({self.as_name:self.namespace})
         return retcode
 
+    def _adjust_names(self,funcode):
+        for (i,(op,arg)) in enumerate(funcode.code):
+            if op in (LOAD_FAST,LOAD_NAME,):
+                funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(LOAD_ATTR,arg)]
+            elif op in (STORE_FAST,STORE_NAME,):
+                funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(STORE_ATTR,arg)]
+            elif op in (DELETE_FAST,DELETE_NAME,):
+                funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(DELETE_ATTR,arg)]
+            elif op in (LOAD_GLOBAL,LOAD_DEREF,):
+                if not self._name_used_before(arg):
+                    funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(LOAD_ATTR,arg)]
+            elif op in (DELETE_GLOBAL,):
+                if not self._name_used_before(arg):
+                    funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(DELETE_ATTR,arg)]
+
     def _name_used_before(self,name):
         for (op,arg) in self.bytecode_before.code:
             if op in (LOAD_GLOBAL,LOAD_DEREF,STORE_GLOBAL,STORE_DEREF,):
                 if arg == name:
                     return True
         return False
+
+
+class keyspace(namespace):
+    """WithHack sending assignments to a specified dict-like object.
+
+    This WithHack permits a construct simlar to the "with" statement from
+    Visual Basic or JavaScript.  Inside a namespace context, all local
+    variable accesses are actually accesses to the keys of that object.
+
+        >>> import sys
+        >>> with keyspace(sys.__dict__):
+        ...     testing = "hello"
+        ...     copyright2 = copyright
+        ...
+        >>> print sys.testing
+        hello
+        >>> print sys.copyright2 == sys.copyright
+        True
+
+    If no object is passed to the constructor, an empty dict is created and
+    used.  To get a reference to the keyspace, use an "as" clause:
+
+        >>> with keyspace() as ks:
+        ...     x = 1
+        ...     y = x + 4
+        ...
+        >>> print ks["x"]; print ks["y"]
+        1
+        5
+
+    """
+
+    def __init__(self,ns=None):
+        if ns is None:
+            ns = {}
+        super(keyspace,self).__init__(ns)
+
+    def _adjust_names(self,funcode):
+        for (i,(op,arg)) in enumerate(funcode.code):
+            if op in (LOAD_FAST,LOAD_NAME,):
+                funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(LOAD_CONST,arg),(BINARY_SUBSCR,None)]
+            elif op in (STORE_FAST,STORE_NAME,):
+                funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(LOAD_CONST,arg),(STORE_SUBSCR,None)]
+            elif op in (DELETE_FAST,DELETE_NAME,):
+                funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(LOAD_CONST,arg),(DELETE_SUBSCR,None)]
+            elif op in (LOAD_GLOBAL,LOAD_DEREF,):
+                if not self._name_used_before(arg):
+                    funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(LOAD_CONST,arg),(BINARY_SUBSCR,None)]
+            elif op in (DELETE_GLOBAL,):
+                if not self._name_used_before(arg):
+                    funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(LOAD_CONST,arg),(DELETE_SUBSCR,None)]
 
