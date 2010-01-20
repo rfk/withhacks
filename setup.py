@@ -1,5 +1,5 @@
 #
-#  This is the dexml setuptools script.
+#  This is the withhacks setuptools script.
 #  Originally developed by Ryan Kelly, 2009.
 #
 #  This script is placed in the public domain.
@@ -7,17 +7,17 @@
 
 from distutils.core import setup
 
-import withrestart
-VERSION = withrestart.__version__
+import withhacks
+VERSION = withhacks.__version__
 
-NAME = "withrestart"
-DESCRIPTION = "a Pythonisation of the restart-based condition system from Common Lisp"
-LONG_DESC = withrestart.__doc__
+NAME = "withhacks"
+DESCRIPTION = "building blocks for with-statement-related hackery"
+LONG_DESC = withhacks.__doc__
 AUTHOR = "Ryan Kelly"
 AUTHOR_EMAIL = "ryan@rfk.id.au"
-URL = "http://github.com/rfk/withrestart"
+URL = "http://github.com/rfk/withhacks"
 LICENSE = "MIT"
-KEYWORDS = "condition restart error exception"
+KEYWORDS = "context manager with statement"
 
 setup(name=NAME,
       version=VERSION,
@@ -28,6 +28,6 @@ setup(name=NAME,
       long_description=LONG_DESC,
       license=LICENSE,
       keywords=KEYWORDS,
-      packages=["withrestart","withrestart.tests"],
+      packages=["withhacks","withhacks.tests"],
      )
 
