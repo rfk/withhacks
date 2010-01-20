@@ -8,6 +8,8 @@ Building on ideas from:
 
 """
 
+from __future__ import with_statement
+
 import sys
 import new
 import copy
@@ -169,17 +171,26 @@ class CaptureBytecode(WithHack):
         frame = self._get_context_frame()
         code = frame.f_code.co_code
         bytecode = Code.from_code(frame.f_code)
-        offset = 0
+        offset_start = -1
         i = 0
         while i < self.__bc_start:
-            offset += 1
+            offset_start += 1
             if code[i] >= HAVE_ARGUMENT:
                 i += 2
             else:
                 i += 1
-        bytecode.code = bytecode.code[offset:]
-        #  Get rid of SetLineno operations, they're troublesome
-        bytecode.code = [(op,arg) for (op,arg) in bytecode.code if op is not SetLineno]
+        offset_end = offset_start
+        while i < frame.f_lasti:
+            offset_end += 1
+            if code[i] >= HAVE_ARGUMENT:
+                i += 2
+            else:
+                i += 1
+        self.bytecode_before = copy.deepcopy(bytecode)
+        self.bytecode_after = copy.deepcopy(bytecode)
+        self.bytecode_before.code = bytecode.code[:offset_start]
+        self.bytecode_after.code = bytecode.code[offset_end:]
+        bytecode.code = bytecode.code[offset_start:offset_end]
         #  Remove code setting up the with-statement block.
         while bytecode.code[0][0] != SETUP_FINALLY:
             bytecode.code = bytecode.code[1:]
@@ -419,5 +430,72 @@ class xkwargs(CaptureLocals,CaptureBytecode):
         retval = self.__func(*self.__args,**kwds)
         if self.as_name is not None:
             self._set_context_locals({self.as_name:retval})
+        return retcode
+
+
+class namespace(CaptureBytecode):
+    """WithHack sending assignments to a specified namespace.
+
+    This WithHack permits a construct simlar to the "with" statement from
+    Visual Basic or JavaScript.  Inside a namespace context, all local
+    variable accesses are actually accesses to the attributes of that
+    object.
+
+        >>> import sys
+        >>> with namespace(sys):
+        ...     testing = "hello"
+        ...     copyright2 = copyright
+        ...
+        >>> print sys.testing
+        hello
+        >>> print sys.copyright2 == sys.copyright
+        True
+
+    If no object is passed to the constructor, an empty object is created and
+    used.  To get a reference to the namespace, use an "as" clause:
+
+        >>> with namespace() as ns:
+        ...     x = 1
+        ...     y = x + 4
+        ...
+        >>> print ns.x; print ns.y
+        1
+        5
+
+    """
+
+    def __init__(self,ns=None):
+        if ns is None:
+            self.namespace = _Bucket()
+        else:
+            self.namespace = ns
+        super(namespace,self).__init__()
+
+    def __exit__(self,*args):
+        frame = self._get_context_frame()
+        retcode = super(namespace,self).__exit__(*args)
+        funcode = copy.deepcopy(self.bytecode)
+        #  Ensure it's a properly formed func by always returning something
+        funcode.code.append((LOAD_CONST,None))
+        funcode.code.append((RETURN_VALUE,None))
+        #  Switch LOAD/STORE/DELETE_FAST/NAME to LOAD/STORE/DELETE_ATTR
+        for (i,(op,arg)) in enumerate(funcode.code):
+            if op in (LOAD_FAST,LOAD_NAME,):
+                funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(LOAD_ATTR,arg)]
+            elif op in (STORE_FAST,STORE_NAME,):
+                funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(STORE_ATTR,arg)]
+            elif op in (DELETE_FAST,DELETE_NAME,):
+                funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(DELETE_ATTR,arg)]
+        #  Create function object to do the manipulation
+        funcode.args = ("namespace",)
+        funcode.varargs = False
+        funcode.varkwargs = False
+        funcode.name = "<withhack>"
+        gs = self._get_context_frame().f_globals
+        func = new.function(funcode.to_code(),gs)
+        #  Execute bytecode in context of namespace
+        retval = func(self.namespace)
+        if self.as_name is not None:
+            self._set_context_locals({self.as_name:self.namespace})
         return retcode
 

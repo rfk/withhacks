@@ -15,7 +15,7 @@ class TestWithHacks(unittest.TestCase):
 
     def test_docstrings(self):
         """Test withhacks docstrings."""
-        assert doctest.testmod(withhacks,verbose=True)[0] == 0
+        assert doctest.testmod(withhacks)[0] == 0
 
     def test_README(self):
         """Ensure that the README is in sync with the docstring.

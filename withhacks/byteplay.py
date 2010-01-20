@@ -1,5 +1,7 @@
 #
 #  [rfk]  I've modified this slightly to work on python2.6
+#      * support for STORE_MAP opcode
+#      * custom __copy__ and __deepcopy__ for SetLineno
 #
 # byteplay - Python bytecode assembler/disassembler.
 # Copyright (C) 2006 Noam Raphael
@@ -208,6 +210,10 @@ def getse(op, arg=None):
 class SetLinenoType(object):
     def __repr__(self):
         return 'SetLineno'
+    def __copy__(self):
+        return self
+    def __deepcopy__(self,memo):
+        return self
 SetLineno = SetLinenoType()
 
 class Label(object):
