@@ -10,7 +10,7 @@ I found around the internet into a suite of re-usable components:
   * http://billmill.org/multi_line_lambdas.html
   * http://code.google.com/p/ouspg/wiki/AnonymousBlocksInPython
 
-By subclasses the appropriate context managers from this module, you can
+By subclassing the appropriate context managers from this module, you can
 easily do things such as:
 
   * skip execution of the code inside the with-statement
