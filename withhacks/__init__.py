@@ -56,6 +56,7 @@ except ImportError:
 
 
 from withhacks.byteplay import *
+from withhacks.tracefunc import inject_trace_func
 
 
 class _ExitContext(Exception):
@@ -63,51 +64,14 @@ class _ExitContext(Exception):
     pass
 
 
+def _exit_context(frame):
+    """Simple function to throw an _ExitContext exception."""
+    raise _ExitContext
+
+
 class _Bucket:
-    """Anonymous attribute bucket class."""
+    """Anonymous attribute-bucket class."""
     pass
-
-
-class TraceManager(object):
-    """Singleton class for managing frame trace functions."""
-
-    lock = threading.Lock()
-    orig_sys_trace = None
-    orig_trace_funcs = {}
-
-    @classmethod
-    def _enable_tracing(self):
-        """Enable system-wide tracing, if it wasn't already."""
-        if len(self.orig_trace_funcs) == 1:
-            try:
-                self.orig_sys_trace = sys.gettrace()
-            except AttributeError:
-                self.orig_sys_trace = None
-            if self.orig_sys_trace is None:
-                sys.settrace(lambda *args,**kwds: None)
-
-    @classmethod
-    def _disable_tracing(self):
-        """Disable system-wide tracing, if we specifically switched it on."""
-        if len(self.orig_trace_funcs) == 1:
-            if self.orig_sys_trace is None:
-                sys.settrace(None)
-
-    @classmethod
-    def set_trace(self,frame,trace):
-        """Set a new trace function on the given frame."""
-        with self.lock:
-            self.orig_trace_funcs[frame] = frame.f_trace
-            frame.f_trace = trace
-            self._enable_tracing()
-          
-
-    @classmethod
-    def restore_trace(self,frame):
-        """Restore the original trace function to the given frame."""
-        with self.lock:
-            self._disable_tracing()
-            frame.f_trace = self.orig_trace_funcs.pop(frame)
 
 
 
@@ -157,22 +121,30 @@ class WithHack(object):
         into the execution context of the with-statement.
         """
         frame = self._get_context_frame()
-        def trace(frame,event,arg):
-            frame.f_locals.update(locals)
-            TraceManager.restore_trace(frame)
-        TraceManager.set_trace(frame,trace)
+        inject_trace_func(frame,lambda frame: frame.f_locals.update(locals))
 
     def __enter__(self):
+        """Enter the context of this WithHack.
+
+        The base implementation will skip execution of the contained
+        code according to the values of "dont_execute" and "must_execute".
+        Be sure to call the superclass version if you override it.
+        """
         if self.dont_execute and not self.must_execute:
             frame = self._get_context_frame()
-            def trace(frame,event,arg):
-                raise _ExitContext
-            TraceManager.set_trace(frame,trace)
+            inject_trace_func(frame,_exit_context)
         return self
 
     def __exit__(self,exc_type,exc_value,traceback):
-        if self.dont_execute and not self.must_execute:
-            TraceManager.restore_trace(self._get_context_frame())
+        """Enter the context of this WithHack.
+
+        This is usually where all the interesting hackery takes place.
+
+        The base implementation suppresses the special _ExitContext exception
+        but lets any other exceptions pass through.  Your subclass should
+        probably do the same - the simplest way is to pass through the return
+        value given by this base implementation.
+        """
         if exc_type is _ExitContext:
             return True
         else:
