@@ -283,12 +283,12 @@ class CaptureFunction(CaptureBytecode):
         return retcode
 
 
-class CaptureLocals(WithHack):
-    """WithHack to capture any local variables modified in the block.
+class CaptureLocals(CaptureBytecode):
+    """WithHack to capture any local variables assigned to in the block.
 
     When the block exits, the attribute "locals" will be a dictionary 
-    containing any local variables that were created or modified during
-    the execution of the block. 
+    containing any local variables that were assigned to during the execution
+    of the block.
 
         >>> with CaptureLocals() as f:
         ...     x = 7
@@ -302,23 +302,14 @@ class CaptureLocals(WithHack):
 
     must_execute = True
 
-    def __enter__(self):
-        frame = self._get_context_frame()
-        self.__pre_locals = frame.f_locals.copy()
-        return super(CaptureLocals,self).__enter__()
-
     def __exit__(self,*args):
+        retcode = super(CaptureLocals,self).__exit__(*args)
         frame = self._get_context_frame()
         self.locals = {}
-        for (name,value) in frame.f_locals.iteritems():
-            if value is self:
-                pass
-            elif name not in self.__pre_locals:
-                self.locals[name] = value
-            elif self.__pre_locals[name] is not value:
-                self.locals[name] = value
-        del self.__pre_locals
-        return super(CaptureLocals,self).__exit__(*args)
+        for (op,arg) in self.bytecode.code:
+           if op in (STORE_FAST,STORE_NAME,):
+               self.locals[arg] = frame.f_locals[arg]
+        return retcode
 
 
 class CaptureOrderedLocals(CaptureBytecode):
@@ -351,6 +342,47 @@ class CaptureOrderedLocals(CaptureBytecode):
                    local_names.append(arg)
         self.locals = [(nm,frame.f_locals[nm]) for nm in local_names]
         return retcode
+
+
+class CaptureModifiedLocals(WithHack):
+    """WithHack to capture any local variables modified in the block.
+
+    When the block exits, the attribute "locals" will be a dictionary 
+    containing any local variables that were created or modified during the
+    execution of the block.
+
+        >>> x = 7
+        >>> with CaptureModifiedLocals() as f:
+        ...     x = 7
+        ...     y = 8
+        ...     z = 9
+        ...
+        >>> f.locals
+        {'y': 8, 'z': 9}
+        >>>
+
+    This differs from CaptureLocals in that it does not detect variables
+    that are assigned within the block if their value doesn't actually
+    change.  It's cheaper to test for but not as reliable.
+    """
+
+    def __enter__(self):
+        frame = self._get_context_frame()
+        self.__pre_locals = frame.f_locals.copy()
+        return super(CaptureModifiedLocals,self).__enter__()
+
+    def __exit__(self,*args):
+        frame = self._get_context_frame()
+        self.locals = {}
+        for (name,value) in frame.f_locals.iteritems():
+            if value is self:
+                pass
+            elif name not in self.__pre_locals:
+                self.locals[name] = value
+            elif self.__pre_locals[name] != value:
+                self.locals[name] = value
+        del self.__pre_locals
+        return super(CaptureModifiedLocals,self).__exit__(*args)
 
 
 class xargs(CaptureOrderedLocals):

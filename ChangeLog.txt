@@ -4,6 +4,9 @@ v0.1.1:
 
     * more robust bytecode capture; the previous version was easily fooled
       by jump-based control structures.
+    * CaptureLocals now looks at the captured bytecode to determine what
+      locals were assigned inside the block; use CaptureModifiedLocals to
+      obtain the previous (quicker, but less reliable) behaviour.
     * much more extensive test suite.
 
 v0.1.0:

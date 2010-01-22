@@ -15,18 +15,36 @@ class TestXArgs(unittest.TestCase):
     def test_xargs(self):
         def func(a,b,c=42):
             return a * b * c
-        with xargs(func) as v1:
+        with xargs(func) as v:
              a = 1
              b = 2
              c = 3
-        self.assertEquals(v1,1*2*3)
-        with xargs(func,7) as v2:
+        self.assertEquals(v,1*2*3)
+        with xargs(func,7) as v:
              x = 8
              y = 9
-        self.assertEquals(v2,7*8*9)
-        with xargs(func,7) as v3:
+        self.assertEquals(v,7*8*9)
+        with xargs(func,7) as v:
              b = 8
-        self.assertEquals(v3,7*8*42)
+        self.assertEquals(v,7*8*42)
+
+    def test_xkwargs(self):
+        def func(a,b,c=42):
+            return a*a - b + c
+        with xkwargs(func) as v:
+             a = 1
+             b = 2
+             c = 3
+        self.assertEquals(v,1*1 - 2 + 3)
+        with xkwargs(func,b=2) as v:
+             c = 4
+             a = -1
+        self.assertEquals(v,1*1 - 2 + 4)
+        with xkwargs(func,b=2) as v:
+             c = 3
+             a = 1
+             c = 5
+        self.assertEquals(v,1*1 - 2 + 5)
 
 
 class TestMisc(unittest.TestCase):
