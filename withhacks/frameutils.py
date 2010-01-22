@@ -1,16 +1,20 @@
 """
 
-  withhacks.tracefunc:  utilities for injecting frame trace functions.
+  withhacks.frameutils:  utilities for hacking with frame objects
 
 """
 
 from __future__ import with_statement
 
 import sys
+import dis
+import new
 try:
     import threading
 except ImportError:
     import dummy_threading as threading
+
+from withhacks.byteplay import Code
 
 
 _trace_lock = threading.Lock()
@@ -75,4 +79,47 @@ def _invoke_trace_funcs(frame,*args,**kwds):
             if len(_orig_trace_funcs) == 1:
                 _disable_tracing()
             frame.f_trace = _orig_trace_funcs.pop(frame)
+
+
+def extract_code(frame,start=None,end=None,name="<withhack>"):
+    """Extract a Code object corresponding to the given frame.
+
+    Given a frame object, this function returns a byteplay Code object with
+    containing the code being executed by the frame.  If the optional "start"
+    "start" and/or "end" arguments are given, they are used as indices to
+    return only a slice of the code.
+    """
+    code = frame.f_code
+    if start is None:
+        if end is None:
+            code_str = code.co_code[:]
+        else:
+            code_str = code.co_code[:end]
+    else:
+        #  Slicing off opcodes at start means we need to adjust any
+        #  absolute jump targets.
+        if end is None:
+            code_list = [c for c in code.co_code[start:]]
+        else:
+            code_list = [c for c in code.co_code[start:end]]
+        i = 0
+        while i < len(code_list):
+            c = ord(code_list[i])
+            if c in dis.hasjabs:
+                code_list[i+1] = chr(ord(code_list[i+1]) - start)
+                i += 2
+            else:
+                if c >= dis.HAVE_ARGUMENT:
+                    i += 2
+                else:
+                    i += 1
+        code_str = "".join(code_list)
+    new_code = new.code(0, code.co_nlocals, 
+                        code.co_stacksize, code.co_flags,
+                        code_str, code.co_consts,
+                        code.co_names, code.co_varnames,
+                        code.co_filename, name,
+                        frame.f_lineno, code.co_lnotab)
+    return Code.from_code(new_code)
+
 

@@ -48,7 +48,6 @@ __version__ = "%d.%d.%d%s" % (__ver_major__,__ver_minor__,
 import sys
 import new
 import copy
-from dis import HAVE_ARGUMENT
 try:
     import threading
 except ImportError:
@@ -56,7 +55,7 @@ except ImportError:
 
 
 from withhacks.byteplay import *
-from withhacks.tracefunc import inject_trace_func
+from withhacks.frameutils import inject_trace_func, extract_code
 
 
 class _ExitContext(Exception):
@@ -177,28 +176,9 @@ class CaptureBytecode(WithHack):
 
     def __exit__(self,*args):
         frame = self._get_context_frame()
-        code = frame.f_code.co_code
-        bytecode = Code.from_code(frame.f_code)
-        offset_start = -1
-        i = 0
-        while i < self.__bc_start:
-            offset_start += 1
-            if code[i] >= HAVE_ARGUMENT:
-                i += 2
-            else:
-                i += 1
-        offset_end = offset_start
-        while i < frame.f_lasti:
-            offset_end += 1
-            if code[i] >= HAVE_ARGUMENT:
-                i += 2
-            else:
-                i += 1
-        self.bytecode_before = copy.deepcopy(bytecode)
-        self.bytecode_after = copy.deepcopy(bytecode)
-        self.bytecode_before.code = bytecode.code[:offset_start]
-        self.bytecode_after.code = bytecode.code[offset_end:]
-        bytecode.code = bytecode.code[offset_start:offset_end]
+        self.bytecode_before = extract_code(frame,end=self.__bc_start)
+        bytecode = extract_code(frame,self.__bc_start,frame.f_lasti)
+        self.bytecode_after = extract_code(frame,start=frame.f_lasti)
         #  Remove code setting up the with-statement block.
         while bytecode.code[0][0] != SETUP_FINALLY:
             bytecode.code = bytecode.code[1:]
@@ -207,9 +187,10 @@ class CaptureBytecode(WithHack):
         #  and remove the setup code.
         if bytecode.code[0][0] in (LOAD_FAST,LOAD_NAME,LOAD_DEREF,LOAD_GLOBAL):
             if bytecode.code[0][1].startswith("_["):
-                bytecode.code = bytecode.code[2:]
-            self.as_name = bytecode.code[0][1]
-            bytecode.code = bytecode.code[1:]
+                while bytecode.code[0][0] not in (STORE_FAST,STORE_NAME,):
+                    bytecode.code = bytecode.code[1:]
+                self.as_name = bytecode.code[0][1]
+                bytecode.code = bytecode.code[1:]
         #  Remove code tearing down the with-statement block
         while bytecode.code[-1][0] != POP_BLOCK:
             bytecode.code = bytecode.code[:-1]

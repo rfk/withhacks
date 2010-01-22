@@ -10,8 +10,26 @@ import withhacks
 from withhacks import *
 
 
-class TestWithHacks(unittest.TestCase):
-    """Testcases for the "withhacks" module."""
+class TestXArgs(unittest.TestCase):
+
+    def test_xargs(self):
+        def func(a,b,c=42):
+            return a * b * c
+        with xargs(func) as v1:
+             a = 1
+             b = 2
+             c = 3
+        self.assertEquals(v1,1*2*3)
+        with xargs(func,7) as v2:
+             x = 8
+             y = 9
+        self.assertEquals(v2,7*8*9)
+        with xargs(func,7) as v3:
+             b = 8
+        self.assertEquals(v3,7*8*42)
+
+
+class TestMisc(unittest.TestCase):
 
     def test_docstrings(self):
         """Test withhacks docstrings."""

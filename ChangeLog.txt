@@ -1,5 +1,11 @@
 
 
+v0.1.1:
+
+    * more robust bytecode capture; the previous version was easily fooled
+      by jump-based control structures.
+    * much more extensive test suite.
+
 v0.1.0:
 
     * initial release - you might say *everything* has changed...
