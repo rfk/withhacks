@@ -98,6 +98,24 @@ class TestNamespace(unittest.TestCase):
         self.assertEquals(d["howzitgoin"](),"fine thanks")
 
 
+class TestCaptureFunction(unittest.TestCase):
+
+    def test_capture(self):
+        with CaptureFunction() as c:
+            return 42
+        self.assertEquals(c.function(),42)
+        with CaptureFunction(("flag",)) as c:
+            if not flag:
+                raise ValueError
+            return True
+        self.assertRaises(TypeError,c.function)
+        self.assertRaises(ValueError,c.function,False)
+        self.assertTrue(c.function(True))
+        with CaptureFunction() as c:
+            TestCaptureFunction("test_capture").run()
+        c.function()
+
+
 class TestMisc(unittest.TestCase):
 
     def test_docstrings(self):
