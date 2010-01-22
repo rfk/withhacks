@@ -2,6 +2,8 @@
 
 v0.1.1:
 
+    * name lookups inside a namespace() or keyspace() context now look in
+      outer scopes if the name is not an existing attribute/key.
     * more robust bytecode capture; the previous version was easily fooled
       by jump-based control structures.
     * CaptureLocals now looks at the captured bytecode to determine what

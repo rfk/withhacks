@@ -47,6 +47,57 @@ class TestXArgs(unittest.TestCase):
         self.assertEquals(v,1*1 - 2 + 5)
 
 
+class TestNamespace(unittest.TestCase):
+
+    def test_namespace(self):
+        a = 42
+        with namespace() as ns:
+            a = 2*a
+        self.assertEquals(ns.a,42*2)
+        with namespace() as ns:
+            a = 7
+            b = a * 4
+            v = ValueError
+        self.assertEquals(ns.b,7*4)
+        self.assertEquals(ns.v,ValueError)
+        b = withhacks._Bucket()
+        with namespace(b):
+            def hello():
+                return "hi there"
+            def howzitgoin():
+                return "fine thanks"
+        self.assertEquals(b.hello(),"hi there")
+        self.assertEquals(b.howzitgoin(),"fine thanks")
+        with namespace(b):
+            del hello
+        self.assertRaises(AttributeError,getattr,b,"hello")
+        self.assertEquals(b.howzitgoin(),"fine thanks")
+
+    def test_keyspace(self):
+        a = 42
+        with keyspace() as d:
+            a = 2*a
+        self.assertEquals(d["a"],42*2)
+        with keyspace() as d:
+            a = 7
+            b = a * 4
+            v = ValueError
+        self.assertEquals(d["b"],7*4)
+        self.assertEquals(d["v"],ValueError)
+        d = {}
+        with keyspace(d):
+            def hello():
+                return "hi there"
+            def howzitgoin():
+                return "fine thanks"
+        self.assertEquals(d["hello"](),"hi there")
+        self.assertEquals(d["howzitgoin"](),"fine thanks")
+        with keyspace(d):
+            del hello
+        self.assertRaises(KeyError,d.__getitem__,"hello")
+        self.assertEquals(d["howzitgoin"](),"fine thanks")
+
+
 class TestMisc(unittest.TestCase):
 
     def test_docstrings(self):

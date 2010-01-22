@@ -40,7 +40,7 @@ from __future__ import with_statement
 
 __ver_major__ = 0
 __ver_minor__ = 1
-__ver_patch__ = 0
+__ver_patch__ = 1
 __ver_sub__ = ""
 __version__ = "%d.%d.%d%s" % (__ver_major__,__ver_minor__,
                               __ver_patch__,__ver_sub__)
@@ -176,9 +176,8 @@ class CaptureBytecode(WithHack):
 
     def __exit__(self,*args):
         frame = self._get_context_frame()
-        self.bytecode_before = extract_code(frame,end=self.__bc_start)
         bytecode = extract_code(frame,self.__bc_start,frame.f_lasti)
-        self.bytecode_after = extract_code(frame,start=frame.f_lasti)
+        #print bytecode.code
         #  Remove code setting up the with-statement block.
         while bytecode.code[0][0] != SETUP_FINALLY:
             bytecode.code = bytecode.code[1:]
@@ -500,9 +499,17 @@ class namespace(CaptureBytecode):
         funcode.code.append((LOAD_CONST,None))
         funcode.code.append((RETURN_VALUE,None))
         #  Switch LOAD/STORE/DELETE_FAST/NAME to LOAD/STORE/DELETE_ATTR
-        self._adjust_names(funcode)
+        to_replace = []
+        for (i,(op,arg)) in enumerate(funcode.code):
+            repl = self._replace_opcode((op,arg),frame)
+            if repl:
+                to_replace.append((i,repl))
+        offset = 0
+        for (i,repl) in to_replace:
+            funcode.code[i+offset:i+offset+1] = repl
+            offset += len(repl) - 1
         #  Create function object to do the manipulation
-        funcode.args = ("namespace",)
+        funcode.args = ("_[namespace]",)
         funcode.varargs = False
         funcode.varkwargs = False
         funcode.name = "<withhack>"
@@ -514,27 +521,42 @@ class namespace(CaptureBytecode):
             self._set_context_locals({self.as_name:self.namespace})
         return retcode
 
-    def _adjust_names(self,funcode):
-        for (i,(op,arg)) in enumerate(funcode.code):
-            if op in (LOAD_FAST,LOAD_NAME,):
-                funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(LOAD_ATTR,arg)]
-            elif op in (STORE_FAST,STORE_NAME,):
-                funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(STORE_ATTR,arg)]
-            elif op in (DELETE_FAST,DELETE_NAME,):
-                funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(DELETE_ATTR,arg)]
-            elif op in (LOAD_GLOBAL,LOAD_DEREF,):
-                if not self._name_used_before(arg):
-                    funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(LOAD_ATTR,arg)]
-            elif op in (DELETE_GLOBAL,):
-                if not self._name_used_before(arg):
-                    funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(DELETE_ATTR,arg)]
+    def _replace_opcode(self,(op,arg),frame):
+        if op in (STORE_FAST,STORE_NAME,):
+            return [(LOAD_FAST,"_[namespace]"),(STORE_ATTR,arg)]
+        if op in (DELETE_FAST,DELETE_NAME,):
+            return [(LOAD_FAST,"_[namespace]"),(DELETE_ATTR,arg)]
+        if op in (LOAD_FAST,LOAD_NAME,LOAD_GLOBAL,LOAD_DEREF):
+            excIn = Label(); excOut = Label(); end = Label()
+            return [(SETUP_EXCEPT,excIn),
+                        (LOAD_FAST,"_[namespace]"),(LOAD_ATTR,arg),
+                        (STORE_FAST,"_[ns_value]"),
+                        (POP_BLOCK,None),(JUMP_FORWARD,end),
+                    (excIn,None),
+                        (DUP_TOP,None),(LOAD_CONST,AttributeError),
+                        (COMPARE_OP,"exception match"),(JUMP_IF_FALSE,excOut),
+                        (POP_TOP,None),(POP_TOP,None),
+                        (POP_TOP,None),(POP_TOP,None),
+                        (LOAD_CONST,self._load_name),(LOAD_CONST,frame),
+                        (LOAD_CONST,arg),(CALL_FUNCTION,2),
+                        (STORE_FAST,"_[ns_value]"),(JUMP_FORWARD,end),
+                    (excOut,None),
+                        (POP_TOP,None),(END_FINALLY,None),
+                    (end,None),
+                        (LOAD_FAST,"_[ns_value]")]
+        return None
 
-    def _name_used_before(self,name):
-        for (op,arg) in self.bytecode_before.code:
-            if op in (LOAD_GLOBAL,LOAD_DEREF,STORE_GLOBAL,STORE_DEREF,):
-                if arg == name:
-                    return True
-        return False
+    def _load_name(self,frame,name):
+        try:
+            return frame.f_locals[name]
+        except KeyError:
+            try:
+                return frame.f_globals[name]
+            except KeyError:
+                try:
+                    return frame.f_builtins[name]
+                except KeyError:
+                    raise NameError(name)
 
 
 class keyspace(namespace):
@@ -572,18 +594,31 @@ class keyspace(namespace):
             ns = {}
         super(keyspace,self).__init__(ns)
 
-    def _adjust_names(self,funcode):
-        for (i,(op,arg)) in enumerate(funcode.code):
-            if op in (LOAD_FAST,LOAD_NAME,):
-                funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(LOAD_CONST,arg),(BINARY_SUBSCR,None)]
-            elif op in (STORE_FAST,STORE_NAME,):
-                funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(LOAD_CONST,arg),(STORE_SUBSCR,None)]
-            elif op in (DELETE_FAST,DELETE_NAME,):
-                funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(LOAD_CONST,arg),(DELETE_SUBSCR,None)]
-            elif op in (LOAD_GLOBAL,LOAD_DEREF,):
-                if not self._name_used_before(arg):
-                    funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(LOAD_CONST,arg),(BINARY_SUBSCR,None)]
-            elif op in (DELETE_GLOBAL,):
-                if not self._name_used_before(arg):
-                    funcode.code[i:i+1]=[(LOAD_FAST,"namespace"),(LOAD_CONST,arg),(DELETE_SUBSCR,None)]
+    def _replace_opcode(self,(op,arg),frame):
+        if op in (STORE_FAST,STORE_NAME,):
+            return [(LOAD_FAST,"_[namespace]"),(LOAD_CONST,arg),
+                    (STORE_SUBSCR,arg)]
+        if op in (DELETE_FAST,DELETE_NAME,):
+            return [(LOAD_FAST,"_[namespace]"),(LOAD_CONST,arg),
+                    (DELETE_SUBSCR,arg)]
+        if op in (LOAD_FAST,LOAD_NAME,LOAD_GLOBAL,LOAD_DEREF):
+            excIn = Label(); excOut = Label(); end = Label()
+            return [(SETUP_EXCEPT,excIn),
+                        (LOAD_FAST,"_[namespace]"),(LOAD_CONST,arg),
+                        (BINARY_SUBSCR,arg),
+                        (STORE_FAST,"_[ns_value]"),
+                        (POP_BLOCK,None),(JUMP_FORWARD,end),
+                    (excIn,None),
+                        (DUP_TOP,None),(LOAD_CONST,KeyError),
+                        (COMPARE_OP,"exception match"),(JUMP_IF_FALSE,excOut),
+                        (POP_TOP,None),(POP_TOP,None),
+                        (POP_TOP,None),(POP_TOP,None),
+                        (LOAD_CONST,self._load_name),(LOAD_CONST,frame),
+                        (LOAD_CONST,arg),(CALL_FUNCTION,2),
+                        (STORE_FAST,"_[ns_value]"),(JUMP_FORWARD,end),
+                    (excOut,None),
+                        (POP_TOP,None),(END_FINALLY,None),
+                    (end,None),
+                        (LOAD_FAST,"_[ns_value]")]
+        return None
 
