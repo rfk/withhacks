@@ -17,6 +17,8 @@ except ImportError:
 from withhacks.byteplay import Code
 
 
+__all__ = ["inject_trace_func","extract_code","load_name"]
+
 _trace_lock = threading.Lock()
 _orig_sys_trace = None
 _orig_trace_funcs = {}
@@ -121,5 +123,24 @@ def extract_code(frame,start=None,end=None,name="<withhack>"):
                         code.co_filename, name,
                         frame.f_lineno, code.co_lnotab)
     return Code.from_code(new_code)
+
+
+def load_name(frame,name):
+    """Get the value of the named variable, as seen by the given frame.
+
+    The name is first looked for in f_locals, then f_globals, and finally
+    f_builtins.  If it's not defined in any of these scopes, NameError 
+    is raised.
+    """
+    try:
+        return frame.f_locals[name]
+    except KeyError:
+        try:
+            return frame.f_globals[name]
+        except KeyError:
+            try:
+                return frame.f_builtins[name]
+            except KeyError:
+                raise NameError(name)
 
 

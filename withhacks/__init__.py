@@ -55,7 +55,7 @@ except ImportError:
 
 
 from withhacks.byteplay import *
-from withhacks.frameutils import inject_trace_func, extract_code
+from withhacks.frameutils import *
 
 
 class _ExitContext(Exception):
@@ -537,7 +537,7 @@ class namespace(CaptureBytecode):
                         (COMPARE_OP,"exception match"),(JUMP_IF_FALSE,excOut),
                         (POP_TOP,None),(POP_TOP,None),
                         (POP_TOP,None),(POP_TOP,None),
-                        (LOAD_CONST,self._load_name),(LOAD_CONST,frame),
+                        (LOAD_CONST,load_name),(LOAD_CONST,frame),
                         (LOAD_CONST,arg),(CALL_FUNCTION,2),
                         (STORE_FAST,"_[ns_value]"),(JUMP_FORWARD,end),
                     (excOut,None),
@@ -545,18 +545,6 @@ class namespace(CaptureBytecode):
                     (end,None),
                         (LOAD_FAST,"_[ns_value]")]
         return None
-
-    def _load_name(self,frame,name):
-        try:
-            return frame.f_locals[name]
-        except KeyError:
-            try:
-                return frame.f_globals[name]
-            except KeyError:
-                try:
-                    return frame.f_builtins[name]
-                except KeyError:
-                    raise NameError(name)
 
 
 class keyspace(namespace):
@@ -613,7 +601,7 @@ class keyspace(namespace):
                         (COMPARE_OP,"exception match"),(JUMP_IF_FALSE,excOut),
                         (POP_TOP,None),(POP_TOP,None),
                         (POP_TOP,None),(POP_TOP,None),
-                        (LOAD_CONST,self._load_name),(LOAD_CONST,frame),
+                        (LOAD_CONST,load_name),(LOAD_CONST,frame),
                         (LOAD_CONST,arg),(CALL_FUNCTION,2),
                         (STORE_FAST,"_[ns_value]"),(JUMP_FORWARD,end),
                     (excOut,None),
