@@ -1,6 +1,15 @@
 
+Status: Unmaintained
+====================
 
-  withhacks:  building blocks for with-statement-related hackery
+
+[![No Maintenance Intended](http://unmaintained.tech/badge.svg)](http://unmaintained.tech/)
+
+I am [no longer actively maintaining this project](https://rfk.id.au/blog/entry/archiving-open-source-projects/).
+
+
+withhacks:  building blocks for with-statement-related hackery
+==============================================================
 
 This module is a collection of useful building-blocks for hacking the Python
 "with" statement.  It combines ideas from several neat with-statement hacks 
